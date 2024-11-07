@@ -28,12 +28,18 @@ sudo systemctl restart dnsmasq
 sudo mkdir -p /var/lib/tftpboot
 cd /var/lib/tftpboot
 
-# Копирование файлов загрузчика
-wget https://mirrors.edge.kernel.org/pub/linux/utils/boot/syslinux/syslinux-6.04-pre1.tar.gz
-tar -xzf syslinux-6.04-pre1.tar.gz
+# Копирование файлов загрузчика (syslinux)
+cp /path/to/syslinux-6.03/bios/com32/pxelinux/pxelinux.0 /var/lib/tftpboot/
+cp /path/to/syslinux-6.03/bios/com32/menu/ldlinux.c32 /var/lib/tftpboot/
+cp /path/to/syslinux-6.03/bios/com32/menu/menu.c32 /var/lib/tftpboot/
 
-# Копирование pxelinux.0
-cp syslinux-6.04-pre1/bios/core/pxelinux.0 /var/lib/tftpboot/
+# Создание конфигурации PXE с меню выбора дистрибутива
+mkdir -p /var/lib/tftpboot/pxelinux.cfg
+cat <<EOF | sudo tee /var/lib/tftpboot/pxelinux.cfg/default > /dev/null
+DEFAULT menu.c32
+TIMEOUT 600
+PROMPT 0
+ONTIMEOUT local
 
 # Создание конфигурации PXE
 mkdir -p /var/lib/tftpboot/pxelinux.cfg
