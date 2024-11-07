@@ -11,12 +11,12 @@ sudo systemctl enable --now dnsmasq
 sudo systemctl enable --now tftp.socket
 sudo systemctl enable --now nfs-server
 
-# Настройка DHCP через dnsmasq
+# Настройка DHCP через dnsmasq (без настройки диапазона IP, так как DHCP на другом сервере)
 cat <<EOF | sudo tee /etc/dnsmasq.conf > /dev/null
 # Настройки для PXE сервера
-interface=eth0           # Используем интерфейс eth0, замените на нужный
-dhcp-range=192.168.1.20,192.168.1.50,12h # Диапазон IP для DHCP
-dhcp-boot=pxelinux.0     # Имя файла загрузчика
+interface=ens18           # Используем интерфейс ens18, замените на нужный
+#dhcp-range=192.168.2.20,192.168.2.50,12h # Диапазон IP для DHCP если на этом сервере DHCP сервер
+dhcp-boot=pxelinux.0,192.168.2.244  # Имя файла загрузчика и IP PXE-сервера
 enable-tftp              # Включаем TFTP
 tftp-root=/var/lib/tftpboot # Папка с TFTP файлами
 EOF
@@ -71,13 +71,6 @@ mount -o loop /var/lib/tftpboot/almalinux-9.4/isolinux/AlmaLinux-9.4-x86_64-Live
 cp /mnt/isolinux/vmlinuz /var/lib/tftpboot/almalinux-9.4/isolinux/
 cp /mnt/isolinux/initrd.img /var/lib/tftpboot/almalinux-9.4/isolinux/
 umount /mnt
-
-# Настройка NFS для раздачи файлов
-echo "/var/lib/tftpboot *(ro,sync,no_root_squash)" | sudo tee -a /etc/exports
-
-# Перезапуск NFS
-sudo exportfs -r
-sudo systemctl restart nfs-server
 
 # Открытие портов на firewall
 sudo firewall-cmd --permanent --zone=public --add-service=dhcp
