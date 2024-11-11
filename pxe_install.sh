@@ -1,97 +1,97 @@
 #!/bin/bash
 
-# Обновление системы
-sudo dnf update -y
+# Функция для логгирования и проверки успешности команды
+check_command() {
+    "$@"
+    local status=$?
+    if [ $status -ne 0 ]; then
+        echo "Ошибка при выполнении: $@" >&2
+        exit $status
+    else
+        echo "Успешно: $@"
+    fi
+    return $status
+}
 
-# Установка необходимых пакетов
-sudo dnf install -y dnsmasq tftp-server nfs-utils syslinux wget
+# Обновление системы и установка необходимых пакетов
+echo "Обновление системы..."
+check_command sudo dnf update -y
+echo "Установка необходимых пакетов..."
+check_command sudo dnf install -y dnsmasq tftp-server syslinux wget vim curl git tar
 
-# Включение и запуск необходимых сервисов
-sudo systemctl enable --now dnsmasq
-sudo systemctl enable --now tftp.socket
-sudo systemctl enable --now nfs-server
+# Включение и запуск TFTP и DHCP сервисов
+echo "Включение и запуск сервисов..."
+check_command sudo systemctl enable --now dnsmasq
+check_command sudo systemctl enable --now tftp.socket
 
-# Настройка DHCP через dnsmasq (без настройки диапазона IP, так как DHCP на другом сервере)
+# Настройка dnsmasq для PXE
+echo "Настройка dnsmasq для PXE..."
 cat <<EOF | sudo tee /etc/dnsmasq.conf > /dev/null
-# Настройки для PXE сервера
-interface=ens18           # Используем интерфейс ens18, замените на нужный
-#dhcp-range=192.168.2.20,192.168.2.50,12h # Диапазон IP для DHCP если на этом сервере DHCP сервер
-dhcp-boot=pxelinux.0,192.168.2.244  # Имя файла загрузчика и IP PXE-сервера
-enable-tftp              # Включаем TFTP
-tftp-root=/var/lib/tftpboot # Папка с TFTP файлами
+interface=ens18                 # Используем интерфейс, замените на нужный
+dhcp-boot=pxelinux.0,192.168.2.244
+enable-tftp
+tftp-root=/var/lib/tftpboot
 EOF
-
-# Перезапуск dnsmasq с новыми настройками
-sudo systemctl restart dnsmasq
+check_command sudo systemctl restart dnsmasq
 
 # Настройка TFTP сервера
-sudo mkdir -p /var/lib/tftpboot
+echo "Настройка TFTP сервера..."
+check_command sudo mkdir -p /var/lib/tftpboot
 cd /var/lib/tftpboot
 
-# Копирование файлов загрузчика
-wget https://mirrors.edge.kernel.org/pub/linux/utils/boot/syslinux/syslinux-6.03.tar.gz
+# Копирование PXE-загрузчика
+echo "Загрузка и распаковка syslinux..."
+check_command wget https://mirrors.edge.kernel.org/pub/linux/utils/boot/syslinux/syslinux-6.03.tar.gz
+check_command tar -xzf syslinux-6.03.tar.gz
+check_command cp syslinux-6.03/bios/core/pxelinux.0 /var/lib/tftpboot/
+check_command cp syslinux-6.03/bios/com32/menu/menu.c32 /var/lib/tftpboot/
+check_command cp syslinux-6.03/bios/com32/elflink/ldlinux/ldlinux.c32 /var/lib/tftpboot/
+check_command cp syslinux-6.03/bios/com32/libutil/libutil.c32 /var/lib/tftpboot/
 
-#Распаковка архива
-tar -xzf syslinux-6.03.tar.gz
-
-cp syslinux-6.03/bios/com32/pxelinux/pxelinux.0 /var/lib/tftpboot/
-cp syslinux-6.03/bios/com32/elflink/ldlinux/ldlinux.c32 /var/lib/tftpboot/
-cp syslinux-6.03/bios/com32/menu/menu.c32 /var/lib/tftpboot/
-
-#Смена владельца
-sudo chown -R nobody:nobody /var/lib/tftpboot/
-sudo chmod -R 755 /var/lib/tftpboot/
-
-
-# Создание конфигурации PXE с меню выбора дистрибутива
-mkdir -p /var/lib/tftpboot/pxelinux.cfg
+# Настройка PXE меню
+echo "Настройка PXE меню..."
+check_command mkdir -p /var/lib/tftpboot/pxelinux.cfg
 cat <<EOF | sudo tee /var/lib/tftpboot/pxelinux.cfg/default > /dev/null
 DEFAULT menu.c32
-TIMEOUT 600
 PROMPT 0
-ONTIMEOUT local
+TIMEOUT 50
+ONTIMEOUT thinstation
 
-# Создание конфигурации PXE
-mkdir -p /var/lib/tftpboot/pxelinux.cfg
-cat <<EOF | sudo tee /var/lib/tftpboot/pxelinux.cfg/default > /dev/null
-DEFAULT menu
-LABEL menu
-    MENU TITLE PXE Boot Menu
-    MENU BACKGROUND splash.png
-    TIMEOUT 100
-    ONTIMEOUT local
-    PROMPT 0
-    LABEL ubuntu
-        MENU LABEL Ubuntu 24.04.1 LTS
-        KERNEL /ubuntu-installer/amd64/linux
-        APPEND initrd=/ubuntu-installer/amd64/initrd.gz
-    LABEL almalinux
-        MENU LABEL AlmaLinux 9.4
-        KERNEL /almalinux-9.4/isolinux/vmlinuz
-        APPEND initrd=/almalinux-9.4/isolinux/initrd.img
+LABEL thinstation
+    MENU LABEL ThinStation RDP Client
+    KERNEL thinstation/vmlinuz
+    APPEND initrd=thinstation/initrd splash lang=en screen=1024x768
 EOF
 
-# Скачиваем необходимые файлы ядра и initrd для Ubuntu 24.04.1
-cd /var/lib/tftpboot
-mkdir -p ubuntu-installer/amd64
-wget https://releases.ubuntu.com/24.04.1/ubuntu-24.04.1-desktop-amd64.iso -O /var/lib/tftpboot/ubuntu-installer/amd64/ubuntu-24.04.1-desktop-amd64.iso
-mount -o loop /var/lib/tftpboot/ubuntu-installer/amd64/ubuntu-24.04.1-desktop-amd64.iso /mnt
-cp /mnt/casper/vmlinuz /var/lib/tftpboot/ubuntu-installer/amd64/
-cp /mnt/casper/initrd /var/lib/tftpboot/ubuntu-installer/amd64/
-umount /mnt
+# Загрузка и установка ThinStation
+echo "Загрузка ThinStation из репозитория..."
+check_command mkdir -p /var/lib/tftpboot/thinstation
+cd /var/lib/tftpboot/thinstation
+check_command git clone https://github.com/Thinstation/thinstation.git .
+check_command ./setup-chroot.sh
 
-# Скачиваем файлы для AlmaLinux 9.4
-mkdir -p almalinux-9.4/isolinux
-wget https://raw.repo.almalinux.org/almalinux/9.4/live/x86_64/AlmaLinux-9.4-x86_64-Live-GNOME-Mini.iso -O /var/lib/tftpboot/almalinux-9.4/isolinux/AlmaLinux-9.4-x86_64-Live-GNOME-Mini.iso
-mount -o loop /var/lib/tftpboot/almalinux-9.4/isolinux/AlmaLinux-9.4-x86_64-Live-GNOME-Mini.iso /mnt
-cp /mnt/isolinux/vmlinuz /var/lib/tftpboot/almalinux-9.4/isolinux/
-cp /mnt/isolinux/initrd.img /var/lib/tftpboot/almalinux-9.4/isolinux/
-umount /mnt
+# Сборка файлов ThinStation с настройками RDP
+echo "Настройка ThinStation для RDP..."
+cat <<EOF > build.conf
+NET_USE_DHCP=On
+SESSION_0_TYPE=rdesktop
+SESSION_0_TITLE="Remote Desktop"
+SESSION_0_RDESKTOP_SERVER="192.168.2.25"    # IP адрес RDP сервера
+#SESSION_0_RDESKTOP_OPTIONS="-f -u user -p password" # Настройки подключения (замените на свои)
+EOF
 
-# Открытие портов на firewall
-sudo firewall-cmd --permanent --zone=public --add-service=dhcp
-sudo firewall-cmd --permanent --zone=public --add-service=tftp
-sudo firewall-cmd --permanent --zone=public --add-service=nfs
-sudo firewall-cmd --reload
+echo "Сборка ThinStation для PXE..."
+check_command ./build.sh -b pxe
 
-echo "PXE сервер установлен и настроен. Перезагрузите сервер."
+# Копирование сгенерированных файлов в TFTP директорию
+echo "Копирование сгенерированных файлов в TFTP директорию..."
+check_command cp boot-images/pxe/vmlinuz /var/lib/tftpboot/thinstation/
+check_command cp boot-images/pxe/initrd /var/lib/tftpboot/thinstation/
+
+# Открытие необходимых портов на firewall
+echo "Открытие необходимых портов на firewall..."
+check_command sudo firewall-cmd --permanent --zone=public --add-service=tftp
+check_command sudo firewall-cmd --permanent --zone=public --add-service=dhcp
+check_command sudo firewall-cmd --reload
+
+echo "ThinStation PXE сервер установлен и настроен. Перезагрузите сервер для применения настроек."
