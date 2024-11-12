@@ -1,97 +1,162 @@
 #!/bin/bash
 
-# Функция для логгирования и проверки успешности команды
-check_command() {
-    "$@"
-    local status=$?
-    if [ $status -ne 0 ]; then
-        echo "Ошибка при выполнении: $@" >&2
-        exit $status
+# Функция для проверки успешности выполнения команды
+check_success() {
+    if [ $? -ne 0 ]; then
+        echo "Ошибка при выполнении: $1"
+        exit 1
     else
-        echo "Успешно: $@"
+        echo "Успешно: $1"
     fi
-    return $status
 }
 
-# Обновление системы и установка необходимых пакетов
+# Функция для повторных попыток команды
+retry_command() {
+    local retries=5
+    local wait=5
+    local attempt=1
+    local cmd="$@"
+    
+    until $cmd; do
+        if (( attempt == retries )); then
+            echo "Команда '$cmd' не удалась после $retries попыток."
+            exit 1
+        fi
+        echo "Попытка $attempt из $retries завершилась с ошибкой. Повтор через $wait секунд..."
+        sleep $wait
+        ((attempt++))
+    done
+    echo "Успешно: $cmd"
+}
+
+# Получение последней версии ThinStation из репозитория
+get_latest_version() {
+    echo "Получение последней версии ThinStation..."
+    latest_version=$(git ls-remote --tags https://github.com/Thinstation/thinstation.git | \
+                     grep -o 'refs/tags/v[0-9]*\.[0-9]*\.[0-9]*' | \
+                     sort -V | tail -n1 | sed 's/refs\/tags\///')
+    echo "Последняя версия ThinStation: $latest_version"
+}
+
+# Обновление системы
 echo "Обновление системы..."
-check_command sudo dnf update -y
+sudo dnf update -y
+check_success "Обновление системы"
+
+# Установка необходимых пакетов
 echo "Установка необходимых пакетов..."
-check_command sudo dnf install -y dnsmasq tftp-server syslinux wget vim curl git tar
+sudo dnf install -y dnsmasq tftp-server nfs-utils syslinux wget vim git curl tmux tar cifs-utils rsync
+check_success "Установка пакетов"
 
-# Включение и запуск TFTP и DHCP сервисов
-echo "Включение и запуск сервисов..."
-check_command sudo systemctl enable --now dnsmasq
-check_command sudo systemctl enable --now tftp.socket
+# Включение и запуск необходимых сервисов
+echo "Включение и запуск сервисов dnsmasq, tftp и nfs..."
+sudo systemctl enable --now dnsmasq
+check_success "Запуск dnsmasq"
+sudo systemctl enable --now tftp.socket
+check_success "Запуск tftp"
+sudo systemctl enable --now nfs-server
+check_success "Запуск nfs-server"
 
-# Настройка dnsmasq для PXE
-echo "Настройка dnsmasq для PXE..."
+# Настройка dnsmasq для PXE, без раздачи IP
+echo "Настройка dnsmasq..."
 cat <<EOF | sudo tee /etc/dnsmasq.conf > /dev/null
-interface=ens18                 # Используем интерфейс, замените на нужный
+# Настройки для PXE сервера
+interface=ens18
 dhcp-boot=pxelinux.0,192.168.2.244
 enable-tftp
 tftp-root=/var/lib/tftpboot
 EOF
-check_command sudo systemctl restart dnsmasq
+check_success "Настройка dnsmasq"
+
+# Перезапуск dnsmasq с новыми настройками
+echo "Перезапуск dnsmasq..."
+sudo systemctl restart dnsmasq
+check_success "Перезапуск dnsmasq"
 
 # Настройка TFTP сервера
 echo "Настройка TFTP сервера..."
-check_command sudo mkdir -p /var/lib/tftpboot
+sudo mkdir -p /var/lib/tftpboot
 cd /var/lib/tftpboot
 
-# Копирование PXE-загрузчика
+# Копирование файлов загрузчика
 echo "Загрузка и распаковка syslinux..."
-check_command wget https://mirrors.edge.kernel.org/pub/linux/utils/boot/syslinux/syslinux-6.03.tar.gz
-check_command tar -xzf syslinux-6.03.tar.gz
-check_command cp syslinux-6.03/bios/core/pxelinux.0 /var/lib/tftpboot/
-check_command cp syslinux-6.03/bios/com32/menu/menu.c32 /var/lib/tftpboot/
-check_command cp syslinux-6.03/bios/com32/elflink/ldlinux/ldlinux.c32 /var/lib/tftpboot/
-check_command cp syslinux-6.03/bios/com32/libutil/libutil.c32 /var/lib/tftpboot/
+retry_command wget https://mirrors.edge.kernel.org/pub/linux/utils/boot/syslinux/syslinux-6.03.tar.gz -O syslinux.tar.gz
+check_success "Загрузка syslinux"
+tar -xzf syslinux.tar.gz
+check_success "Распаковка syslinux"
 
-# Настройка PXE меню
-echo "Настройка PXE меню..."
-check_command mkdir -p /var/lib/tftpboot/pxelinux.cfg
-cat <<EOF | sudo tee /var/lib/tftpboot/pxelinux.cfg/default > /dev/null
-DEFAULT menu.c32
-PROMPT 0
-TIMEOUT 50
-ONTIMEOUT thinstation
+if [ -f syslinux-6.03/bios/core/pxelinux.0 ]; then
+    cp syslinux-6.03/bios/core/pxelinux.0 /var/lib/tftpboot/
+    check_success "Копирование pxelinux.0"
+else
+    echo "Ошибка: не удалось найти pxelinux.0 в syslinux-6.03."
+    exit 1
+fi
 
-LABEL thinstation
-    MENU LABEL ThinStation RDP Client
-    KERNEL thinstation/vmlinuz
-    APPEND initrd=thinstation/initrd splash lang=en screen=1024x768
-EOF
+cp syslinux-6.03/bios/com32/elflink/ldlinux/ldlinux.c32 /var/lib/tftpboot/
+cp syslinux-6.03/bios/com32/menu/menu.c32 /var/lib/tftpboot/
+cp syslinux-6.03/bios/com32/libutil/libutil.c32 /var/lib/tftpboot/
+sudo chown -R nobody:nobody /var/lib/tftpboot/
+sudo chmod -R 755 /var/lib/tftpboot/
+check_success "Копирование файлов загрузчика"
 
-# Загрузка и установка ThinStation
-echo "Загрузка ThinStation из репозитория..."
-check_command mkdir -p /var/lib/tftpboot/thinstation
+# Получение последней версии ThinStation
+get_latest_version
+
+# Настройка ThinStation
+echo "Настройка ThinStation..."
+mkdir -p /var/lib/tftpboot/thinstation
 cd /var/lib/tftpboot/thinstation
-check_command git clone https://github.com/Thinstation/thinstation.git .
-check_command ./setup-chroot.sh
+
+# Загрузка ThinStation с использованием последней версии
+echo "Загрузка ThinStation версии $latest_version через git..."
+retry_command git clone --branch "$latest_version" https://github.com/Thinstation/thinstation.git .
+check_success "Загрузка ThinStation $latest_version"
 
 # Сборка файлов ThinStation с настройками RDP
 echo "Настройка ThinStation для RDP..."
-cat <<EOF > build.conf
+cat <<EOF > /var/lib/tftpboot/thinstation/build.conf
 NET_USE_DHCP=On
 SESSION_0_TYPE=rdesktop
 SESSION_0_TITLE="Remote Desktop"
 SESSION_0_RDESKTOP_SERVER="192.168.2.25"    # IP адрес RDP сервера
-#SESSION_0_RDESKTOP_OPTIONS="-f -u user -p password" # Настройки подключения (замените на свои)
+SESSION_0_RDESKTOP_OPTIONS="-f -u user -p password" # Настройки подключения (замените на свои)
 EOF
+check_success "Создание build.conf для RDP подключения"
 
+# Сборка ThinStation для PXE
 echo "Сборка ThinStation для PXE..."
-check_command ./build.sh -b pxe
+cd /var/lib/tftpboot/thinstation
+retry_command ./build -b pxe
+check_success "Сборка ThinStation для PXE"
 
-# Копирование сгенерированных файлов в TFTP директорию
-echo "Копирование сгенерированных файлов в TFTP директорию..."
-check_command cp boot-images/pxe/vmlinuz /var/lib/tftpboot/thinstation/
-check_command cp boot-images/pxe/initrd /var/lib/tftpboot/thinstation/
+# Создание конфигурации PXE
+echo "Создание конфигурации PXE..."
+mkdir -p /var/lib/tftpboot/pxelinux.cfg
+cat <<EOF | sudo tee /var/lib/tftpboot/pxelinux.cfg/default > /dev/null
+DEFAULT menu.c32
+TIMEOUT 600
+PROMPT 0
+ONTIMEOUT local
+LABEL thinstation
+    MENU LABEL ThinStation
+    KERNEL /thinstation/bzImage
+    APPEND initrd=/thinstation/initrd console=ttyS0
+EOF
+check_success "Создание PXE конфигурации"
 
-# Открытие необходимых портов на firewall
-echo "Открытие необходимых портов на firewall..."
-check_command sudo firewall-cmd --permanent --zone=public --add-service=tftp
-check_command sudo firewall-cmd --permanent --zone=public --add-service=dhcp
-check_command sudo firewall-cmd --reload
+# Настройка NFS для раздачи файлов
+echo "Настройка NFS..."
+echo "/var/lib/tftpboot *(ro,sync,no_root_squash)" | sudo tee -a /etc/exports
+sudo exportfs -r
+sudo systemctl restart nfs-server
+check_success "Настройка NFS"
+
+# Открытие портов на firewall
+echo "Открытие портов на firewall..."
+sudo firewall-cmd --permanent --zone=public --add-service=tftp
+sudo firewall-cmd --permanent --zone=public --add-service=nfs
+sudo firewall-cmd --reload
+check_success "Открытие портов на firewall"
 
 echo "ThinStation PXE сервер установлен и настроен. Перезагрузите сервер для применения настроек."
