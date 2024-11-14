@@ -42,6 +42,9 @@ echo "Настройка TFTP сервера..."
 check_command sudo mkdir -p /var/lib/tftpboot
 cd /var/lib/tftpboot
 
+# Настройка git
+git config --global http.postBuffer 524288000  # Увеличиваем размер буфера до 500MB
+
 # Клонирование репозитория ThinStation
 echo "Клонирование репозитория ThinStation..."
 check_command sudo git clone --depth 1 https://github.com/Thinstation/thinstation.git /usr/src/thinstation
