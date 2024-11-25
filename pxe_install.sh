@@ -13,7 +13,8 @@ check_command() {
 echo "Обновление системы..."
 check_command sudo dnf update -y
 echo "Установка необходимых пакетов..."
-check_command sudo dnf install -y dnsmasq tftp-server syslinux wget vim curl git tar openssh-clients dbus
+check_command sudo dnf install -y dnsmasq tftp-server syslinux wget vim curl git tar \
+    openssh-clients dbus genisoimage ImageMagick samba-client passwd
 
 # Настройка SSH-ключа для GitHub
 if [ ! -f "$HOME/.ssh/id_rsa" ]; then
@@ -26,7 +27,7 @@ else
     echo "SSH ключ уже существует."
 fi
 
-# Настройка брандмауэра для HTTP, HTTPS, DNSMASQ, и TFTP
+# Настройка брандмауэра для TFTP, DNS и DHCP
 echo "Настройка брандмауэра для TFTP, DNS и DHCP..."
 check_command sudo firewall-cmd --permanent --add-service=http
 check_command sudo firewall-cmd --permanent --add-service=https
@@ -35,7 +36,6 @@ check_command sudo firewall-cmd --permanent --add-port=53/tcp
 check_command sudo firewall-cmd --permanent --add-port=67/udp
 check_command sudo firewall-cmd --permanent --add-service=tftp
 check_command sudo firewall-cmd --reload
-
 
 # Включение и запуск TFTP и DHCP сервисов
 echo "Включение и запуск сервисов..."
@@ -56,7 +56,6 @@ check_command sudo systemctl restart dnsmasq
 # Настройка TFTP сервера
 echo "Настройка TFTP сервера..."
 check_command sudo mkdir -p /var/lib/tftpboot
-cd /var/lib/tftpboot
 
 # Клонирование или обновление репозитория ThinStation
 REPO_URL="git@github.com:Thinstation/thinstation.git"
@@ -76,12 +75,16 @@ else
     check_command sudo git clone --depth 1 "$REPO_URL" "$THINSTATION_DIR"
 fi
 
-# Переход в каталог ThinStation
+# Настройка сборочной среды и выход из chroot
+echo "Выполнение setup-chroot..."
 cd "$THINSTATION_DIR" || { echo "Ошибка: каталог ThinStation не найден."; exit 1; }
+check_command ./setup-chroot <<EOF
+exit
+EOF
 
-# Установка конфигурации для сборки образа
+# Создание конфигурации для сборки
 echo "Настройка конфигурации ThinStation для RDP..."
-cat <<EOF > build.conf
+cat <<EOF > build/build.conf
 NET_USE_DHCP=On
 SESSION_0_TYPE=rdesktop
 SESSION_0_TITLE="Remote Desktop"
@@ -89,9 +92,8 @@ SESSION_0_RDESKTOP_SERVER="192.168.2.25"  # Замените на IP-адрес 
 SESSION_0_RDESKTOP_OPTIONS="-f"           # Полноэкранный режим
 EOF
 
-# Выполнение сборки
+# Сборка образа для PXE
 echo "Сборка ThinStation для PXE..."
-check_command ./setup-chroot
 cd build || { echo "Ошибка: каталог build не найден."; exit 1; }
 check_command ./build -b pxe
 
