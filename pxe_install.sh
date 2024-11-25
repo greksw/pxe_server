@@ -85,6 +85,8 @@ exit
 EOF
 
 # Установка недостающих зависимостей внутри chroot-среды
+echo "Создание директории chroot-среды..."
+sudo mkdir -p /srv/ts/chroot
 echo "Установка недостающих зависимостей внутри chroot-среды..."
 sudo chroot /srv/ts/chroot
 check_command sudo dnf install -y gdk-pixbuf2 glib2 librsvg2 samba-common-tools glib2-devel rsvg-convert cryptsetup x11vnc
