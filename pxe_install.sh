@@ -13,7 +13,7 @@ check_command() {
 echo "Обновление системы..."
 check_command sudo dnf update -y
 echo "Установка необходимых пакетов..."
-check_command sudo dnf install -y dnsmasq tftp-server syslinux wget vim curl git tar \
+check_command sudo dnf install -y epel-release dnsmasq tftp-server syslinux wget vim curl git tar \
     openssh-clients dbus genisoimage ImageMagick samba-client passwd
 
 # Настройка SSH-ключа для GitHub
