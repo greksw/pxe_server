@@ -13,7 +13,7 @@ check_command() {
 echo "Обновление системы..."
 check_command sudo dnf update -y
 echo "Установка необходимых пакетов..."
-check_command sudo dnf install -y dnsmasq tftp-server syslinux wget vim curl git tar openssh-clients
+check_command sudo dnf install -y dnsmasq tftp-server syslinux wget vim curl git tar openssh-clients dbus
 
 # Настройка SSH-ключа для GitHub
 if [ ! -f "$HOME/.ssh/id_rsa" ]; then
