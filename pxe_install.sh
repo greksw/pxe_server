@@ -84,6 +84,10 @@ check_command ./setup-chroot <<EOF
 exit
 EOF
 
+# Установка недостающих зависимостей внутри chroot-среды
+echo "Установка недостающих зависимостей внутри chroot-среды..."
+check_command sudo dnf install -y gdk-pixbuf2 gdk-pixbuf-query-loaders glib2 rsvg-convert samba-common-tools
+
 # Создание конфигурации для сборки
 echo "Настройка конфигурации ThinStation для RDP..."
 cat <<EOF > build/build.conf
