@@ -9,12 +9,14 @@ check_command() {
     fi
 }
 
-# Обновление системы и установка необходимых пакетов
-echo "Обновление системы..."
+# Обновление системы и установка необходимых пакетовecho "Обновление системы..."
 check_command sudo dnf update -y
+echo "Установка epel репозитория..."
+check_command sudo dnf install -y epel-release
 echo "Установка необходимых пакетов..."
-check_command sudo dnf install -y epel-release dnsmasq tftp-server syslinux wget vim curl git tar \
+check_command sudo dnf install -y dnsmasq tftp-server syslinux wget vim curl git tar \
     openssh-clients dbus genisoimage ImageMagick samba-client passwd
+
 
 # Настройка SSH-ключа для GitHub
 if [ ! -f "$HOME/.ssh/id_rsa" ]; then
