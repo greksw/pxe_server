@@ -27,12 +27,15 @@ else
 fi
 
 # Настройка брандмауэра для HTTP, HTTPS, DNSMASQ, и TFTP
-echo "Настройка брандмауэра для HTTP и HTTPS..."
+echo "Настройка брандмауэра для TFTP, DNS и DHCP..."
 check_command sudo firewall-cmd --permanent --add-service=http
 check_command sudo firewall-cmd --permanent --add-service=https
-check_command sudo firewall-cmd --permanent --add-service=dnsmasq
+check_command sudo firewall-cmd --permanent --add-port=53/udp
+check_command sudo firewall-cmd --permanent --add-port=53/tcp
+check_command sudo firewall-cmd --permanent --add-port=67/udp
 check_command sudo firewall-cmd --permanent --add-service=tftp
 check_command sudo firewall-cmd --reload
+
 
 # Включение и запуск TFTP и DHCP сервисов
 echo "Включение и запуск сервисов..."
