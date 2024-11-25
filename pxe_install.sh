@@ -4,7 +4,7 @@
 check_command() {
     "$@"
     if [ $? -ne 0 ]; then
-        echo "Ошибка при выполнении команды: $@"
+        echo "Ошибка при выполнении команды: $*"
         exit 1
     fi
 }
@@ -12,14 +12,26 @@ check_command() {
 # Обновление системы и установка необходимых пакетов
 echo "Обновление системы..."
 check_command sudo dnf update -y
-
 echo "Установка необходимых пакетов..."
-check_command sudo dnf install -y dnsmasq tftp-server syslinux wget vim curl git tar
+check_command sudo dnf install -y dnsmasq tftp-server syslinux wget vim curl git tar openssh-clients
 
-# Настройка брандмауэра для разрешения HTTP и HTTPS
+# Настройка SSH-ключа для GitHub
+if [ ! -f "$HOME/.ssh/id_rsa" ]; then
+    echo "Создаем SSH ключ..."
+    ssh-keygen -t rsa -b 4096 -C "greksw@gmail.com" -N "" -f "$HOME/.ssh/id_rsa"
+    echo "Добавьте следующий публичный ключ в ваш GitHub аккаунт:"
+    cat "$HOME/.ssh/id_rsa.pub"
+    read -p "Нажмите Enter, когда ключ будет добавлен на GitHub..."
+else
+    echo "SSH ключ уже существует."
+fi
+
+# Настройка брандмауэра для HTTP, HTTPS, DNSMASQ, и TFTP
 echo "Настройка брандмауэра для HTTP и HTTPS..."
-check_command sudo firewall-cmd --permanent --add-port=80/tcp
-check_command sudo firewall-cmd --permanent --add-port=443/tcp
+check_command sudo firewall-cmd --permanent --add-service=http
+check_command sudo firewall-cmd --permanent --add-service=https
+check_command sudo firewall-cmd --permanent --add-service=dnsmasq
+check_command sudo firewall-cmd --permanent --add-service=tftp
 check_command sudo firewall-cmd --reload
 
 # Включение и запуск TFTP и DHCP сервисов
@@ -35,6 +47,7 @@ dhcp-boot=pxelinux.0,192.168.2.244
 enable-tftp
 tftp-root=/var/lib/tftpboot
 EOF
+
 check_command sudo systemctl restart dnsmasq
 
 # Настройка TFTP сервера
@@ -42,22 +55,30 @@ echo "Настройка TFTP сервера..."
 check_command sudo mkdir -p /var/lib/tftpboot
 cd /var/lib/tftpboot
 
-# Настройка git
-git config --global http.postBuffer 524288000  # Увеличиваем размер буфера до 500MB
+# Клонирование или обновление репозитория ThinStation
+REPO_URL="git@github.com:Thinstation/thinstation.git"
+THINSTATION_DIR="/usr/src/thinstation"
 
-# Клонирование репозитория ThinStation
-echo "Клонирование репозитория ThinStation..."
-check_command sudo git clone --depth 1 https://github.com/Thinstation/thinstation.git /usr/src/thinstation
+if [ -d "$THINSTATION_DIR" ]; then
+    if [ -d "$THINSTATION_DIR/.git" ]; then
+        echo "Репозиторий уже существует. Выполняем обновление..."
+        cd "$THINSTATION_DIR"
+        check_command sudo git pull
+    else
+        echo "Каталог $THINSTATION_DIR существует, но не является репозиторием. Удалите его или очистите."
+        exit 1
+    fi
+else
+    echo "Клонирование репозитория ThinStation..."
+    check_command sudo git clone --depth 1 "$REPO_URL" "$THINSTATION_DIR"
+fi
 
-# Настройка и сборка ThinStation
-echo "Настройка и сборка ThinStation..."
-cd /usr/src/thinstation || { echo "Ошибка: каталог /usr/src/thinstation не найден."; exit 1; }
-check_command sudo ./setup-chroot
-cd /usr/src/thinstation/build
+# Переход в каталог ThinStation
+cd "$THINSTATION_DIR" || { echo "Ошибка: каталог ThinStation не найден."; exit 1; }
 
-# Создание конфигурационного файла для сборки с настройками RDP
-echo "Настройка ThinStation для RDP..."
-cat <<EOF | sudo tee build.conf > /dev/null
+# Установка конфигурации для сборки образа
+echo "Настройка конфигурации ThinStation для RDP..."
+cat <<EOF > build.conf
 NET_USE_DHCP=On
 SESSION_0_TYPE=rdesktop
 SESSION_0_TITLE="Remote Desktop"
@@ -65,15 +86,17 @@ SESSION_0_RDESKTOP_SERVER="192.168.2.25"  # Замените на IP-адрес 
 SESSION_0_RDESKTOP_OPTIONS="-f"           # Полноэкранный режим
 EOF
 
-# Сборка образа ThinStation для PXE
+# Выполнение сборки
 echo "Сборка ThinStation для PXE..."
-check_command sudo ./build -b pxe
+check_command ./setup-chroot
+cd build || { echo "Ошибка: каталог build не найден."; exit 1; }
+check_command ./build -b pxe
 
 # Копирование собранных файлов в TFTP-директорию
 echo "Копирование файлов для PXE-загрузки..."
 check_command sudo cp -r /usr/src/thinstation/build/pxe/* /var/lib/tftpboot
 
-# Настройка PXE конфигурации для ThinStation
+# Настройка PXE-загрузки
 echo "Настройка PXE конфигурации для ThinStation..."
 cat <<EOF | sudo tee /var/lib/tftpboot/pxelinux.cfg/default > /dev/null
 DEFAULT thinstation
