@@ -86,8 +86,8 @@ EOF
 
 # Установка недостающих зависимостей внутри chroot-среды
 echo "Установка недостающих зависимостей внутри chroot-среды..."
-sudo chroot /path/to/chroot
-check_command sudo dnf install -y gdk-pixbuf2 glib2 librsvg2 samba-common-tools gio-common rsvg-convert cryptsetup x11vnc
+sudo chroot /srv/ts/chroot
+check_command sudo dnf install -y gdk-pixbuf2 glib2 librsvg2 samba-common-tools glib2-devel rsvg-convert cryptsetup x11vnc
 
 # Создание конфигурации для сборки
 echo "Настройка конфигурации ThinStation для RDP..."
